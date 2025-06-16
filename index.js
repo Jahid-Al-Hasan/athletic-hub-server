@@ -253,6 +253,40 @@ const run = async () => {
       }
     });
 
+    // update event by creator
+    app.patch("/api/v1/update-event/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updateForm = req.body;
+        // console.log(id, updateForm);
+        if (!id || !updateForm) {
+          return res.status(401).json({
+            error: "Id or data is missing",
+          });
+        }
+        const filter = { _id: new ObjectId(id) };
+        const query = { $set: updateForm };
+        // console.log(query);
+        const result = await eventsCollection.updateOne(filter, query);
+        if (!result) {
+          return res.status(400).json({
+            error: "Something went wrong try again",
+          });
+        }
+        if (!result.modifiedCount > 0) {
+          return res.status(400).json({
+            error: "event does not updated",
+          });
+        }
+        res.status(200).send(result);
+      } catch (error) {
+        console.error("Error fetching events:", error.message);
+        res.status(500).json({
+          error: "An error occurred while fetching events from the database.",
+        });
+      }
+    });
+
     console.log("Connected to MongoDB successfully");
   } catch (err) {
     console.error("Failed to connect to MongoDB", err);
