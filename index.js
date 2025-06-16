@@ -108,7 +108,7 @@ const run = async () => {
     });
 
     // update event participants
-    app.patch("/api/v1/update-event/:id", async (req, res) => {
+    app.patch("/api/v1/update-eventParticipants/:id", async (req, res) => {
       try {
         const email = req.query?.email;
         const eventId = req.params?.id;
@@ -185,7 +185,6 @@ const run = async () => {
 
         const result = await eventsCollection.updateOne(filter, update);
 
-        console.log(result);
         if (!result) {
           return res.status(400).json({
             error: "Booking not canceled",
@@ -212,6 +211,34 @@ const run = async () => {
         const result = await eventsCollection
           .find({ creatorEmail: creatorEmail })
           .toArray();
+        if (!result) {
+          return res.status(400).json({
+            error: "Event not found",
+          });
+        }
+        res.status(200).send(result);
+      } catch (error) {
+        console.error("Error fetching events:", error.message);
+        res.status(500).json({
+          error: "An error occurred while fetching events from the database.",
+        });
+      }
+    });
+
+    // delete event by creator
+    app.delete("/api/v1/delete-event/:id", async (req, res) => {
+      try {
+        const creatorEmail = req.query.creatorEmail;
+        const id = req.params.id;
+        if (!creatorEmail || !id) {
+          return res.status(401).json({
+            error: "Creator Email or eventId not found",
+          });
+        }
+        const result = await eventsCollection.deleteOne(
+          { creatorEmail: creatorEmail },
+          { _id: new ObjectId(id) }
+        );
         if (!result) {
           return res.status(400).json({
             error: "Event not found",
