@@ -25,10 +25,10 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 const run = async () => {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("athleticHubDB");
     const eventsCollection = db.collection("events");
-    const bookingsCollection = db.collection("bookings");
+    const testimonialsCollection = db.collection("testimonials");
 
     // create event
     app.post("/api/v1/createEvent", async (req, res) => {
@@ -284,6 +284,34 @@ const run = async () => {
         res.status(500).json({
           error: "An error occurred while fetching events from the database.",
         });
+      }
+    });
+
+    // insert testimonials
+    app.post("/api/v1/insert-testimonials", async (req, res) => {
+      try {
+        const testimonial = req.body;
+        const result = testimonialsCollection.insertOne(testimonial);
+
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+      }
+    });
+
+    // get testimonials
+    app.get("/api/v1/testimonials", async (req, res) => {
+      try {
+        const result = await testimonialsCollection.find().toArray();
+        if (!result) {
+          res.status(401).json({
+            error: "testimonials not found",
+          });
+        }
+
+        res.status(200).send(result);
+      } catch (error) {
+        console.log(error);
       }
     });
 
