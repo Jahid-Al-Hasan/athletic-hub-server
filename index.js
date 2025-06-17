@@ -10,7 +10,7 @@ const cookieParser = require("cookie-parser");
 // middlewares
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "https://athletichub-ce630.web.app"],
     credentials: true,
   })
 );
@@ -80,7 +80,7 @@ const run = async () => {
     });
 
     // create event
-    app.post("/api/v1/createEvent", async (req, res) => {
+    app.post("/api/v1/createEvent", verifyJWT, async (req, res) => {
       try {
         const newEvent = req.body;
         if (
