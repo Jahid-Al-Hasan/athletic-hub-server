@@ -4,15 +4,18 @@ require("dotenv").config();
 const port = process.env.PORT || 3001;
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 
 // middlewares
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: "http://localhost:5173",
     credentials: true,
   })
 );
 app.use(express.json());
+app.use(cookieParser());
 
 // create mongodb client
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -23,12 +26,58 @@ const client = new MongoClient(process.env.MONGODB_URI, {
   },
 });
 
+// jwt middleware
+const verifyJWT = async (req, res, next) => {
+  const token = req?.cookies?.token;
+  if (!token) {
+    return res.status(401).json({
+      message: "Unauthorized access!",
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userEmail = req?.query?.email;
+    if (userEmail !== decoded.email) {
+      return res.status(403).json({
+        message: "Unauthorized access",
+      });
+    }
+    next();
+  } catch (error) {
+    console.log(error);
+    return res.status(401).json({
+      message: "Unauthorized access!",
+    });
+  }
+};
+
 const run = async () => {
   try {
     // await client.connect();
     const db = client.db("athleticHubDB");
     const eventsCollection = db.collection("events");
     const testimonialsCollection = db.collection("testimonials");
+
+    // jwt generate
+    app.post("/api/v1/jwt", (req, res) => {
+      const user = { email: req.body.email };
+      // console.log(email);
+      const token = jwt.sign(user, process.env.JWT_SECRET, {
+        expiresIn: "1d",
+      });
+      if (!token) {
+        return res.status(401).json({
+          error: "Token not generated",
+        });
+      }
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: false,
+        })
+        .send({ message: "JWT generated successfully" });
+    });
 
     // create event
     app.post("/api/v1/createEvent", async (req, res) => {
@@ -86,7 +135,7 @@ const run = async () => {
       try {
         const eventId = req.params.id;
         if (!eventId) {
-          res.status(401).json({
+          return res.status(401).json({
             message: "Event id not found!",
           });
         }
@@ -94,7 +143,7 @@ const run = async () => {
           _id: new ObjectId(eventId),
         });
         if (!event) {
-          res.status(400).json({
+          return res.status(400).json({
             message: "Event not found",
           });
         }
@@ -108,42 +157,46 @@ const run = async () => {
     });
 
     // update event participants
-    app.patch("/api/v1/update-eventParticipants/:id", async (req, res) => {
-      try {
-        const email = req.query?.email;
-        const eventId = req.params?.id;
+    app.patch(
+      "/api/v1/update-eventParticipants/:id",
+      verifyJWT,
+      async (req, res) => {
+        try {
+          const email = req.query?.email;
+          const eventId = req.params?.id;
 
-        if (!eventId || !email) {
-          return res.status(400).json({
-            message: "Event ID or user email is missing!",
+          if (!eventId || !email) {
+            return res.status(400).json({
+              message: "Event ID or user email is missing!",
+            });
+          }
+
+          const filter = { _id: new ObjectId(eventId) };
+          const update = { $addToSet: { participants: email } };
+
+          const result = await eventsCollection.updateOne(filter, update);
+
+          if (!result) {
+            return res.status(404).json({ message: "Event not updated." });
+          }
+          // console.log(result);
+
+          res.status(200).json({
+            message: "Updated successfully",
+            result,
+          });
+        } catch (error) {
+          console.error("Error fetching event:", error.message);
+          res.status(500).json({
+            error:
+              "An error occurred while fetching the event from the database.",
           });
         }
-
-        const filter = { _id: new ObjectId(eventId) };
-        const update = { $addToSet: { participants: email } };
-
-        const result = await eventsCollection.updateOne(filter, update);
-
-        if (!result) {
-          return res.status(404).json({ message: "Event not updated." });
-        }
-        // console.log(result);
-
-        res.status(200).json({
-          message: "Updated successfully",
-          result,
-        });
-      } catch (error) {
-        console.error("Error fetching event:", error.message);
-        res.status(500).json({
-          error:
-            "An error occurred while fetching the event from the database.",
-        });
       }
-    });
+    );
 
     // get my booking events
-    app.get("/api/v1/my-bookings", async (req, res) => {
+    app.get("/api/v1/my-bookings", verifyJWT, async (req, res) => {
       try {
         const userEmail = req.query.email;
         if (!userEmail) {
@@ -169,7 +222,7 @@ const run = async () => {
     });
 
     // cancel event booking
-    app.patch("/api/v1/cancel-booking/:id", async (req, res) => {
+    app.patch("/api/v1/cancel-booking/:id", verifyJWT, async (req, res) => {
       try {
         const email = req.query.email;
         const id = req.params.id;
@@ -200,9 +253,9 @@ const run = async () => {
     });
 
     // get events by creator
-    app.get("/api/v1/creator-events", async (req, res) => {
+    app.get("/api/v1/creator-events", verifyJWT, async (req, res) => {
       try {
-        const creatorEmail = req.query.creatorEmail;
+        const creatorEmail = req.query.email;
         if (!creatorEmail) {
           return res.status(401).json({
             error: "Creator Email not found",
@@ -226,9 +279,9 @@ const run = async () => {
     });
 
     // delete event by creator
-    app.delete("/api/v1/delete-event/:id", async (req, res) => {
+    app.delete("/api/v1/delete-event/:id", verifyJWT, async (req, res) => {
       try {
-        const creatorEmail = req.query.creatorEmail;
+        const creatorEmail = req.query.email;
         const id = req.params.id;
         if (!creatorEmail || !id) {
           return res.status(401).json({
@@ -254,7 +307,7 @@ const run = async () => {
     });
 
     // update event by creator
-    app.patch("/api/v1/update-event/:id", async (req, res) => {
+    app.patch("/api/v1/update-event/:id", verifyJWT, async (req, res) => {
       try {
         const id = req.params.id;
         const updateForm = req.body;
@@ -304,7 +357,7 @@ const run = async () => {
       try {
         const result = await testimonialsCollection.find().toArray();
         if (!result) {
-          res.status(401).json({
+          return res.status(401).json({
             error: "testimonials not found",
           });
         }
