@@ -16,6 +16,8 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+// ✅ Allow preflight for all routes
+app.options("*", cors({ origin: allowedOrigins, credentials: true }));
 
 // create mongodb client
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -74,7 +76,7 @@ const run = async () => {
       res
         .cookie("token", token, {
           httpOnly: true,
-          secure: false,
+          secure: true,
         })
         .send({ message: "JWT generated successfully" });
     });
