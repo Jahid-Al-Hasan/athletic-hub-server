@@ -16,8 +16,6 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-// ✅ Allow preflight for all routes
-app.options("*", cors({ origin: allowedOrigins, credentials: true }));
 
 // create mongodb client
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -30,14 +28,13 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 // jwt middleware
 const verifyJWT = async (req, res, next) => {
-  const token = req?.cookies?.token;
-  if (!token) {
-    return res.status(401).json({
-      message: "Unauthorized access!",
-    });
-  }
-
   try {
+    const token = req?.cookies?.token;
+    if (!token) {
+      return res.status(401).json({
+        message: "Unauthorized access!",
+      });
+    }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userEmail = req?.query?.email;
     if (userEmail !== decoded.email) {
@@ -48,37 +45,60 @@ const verifyJWT = async (req, res, next) => {
     next();
   } catch (error) {
     console.log(error);
-    return res.status(401).json({
-      message: "Unauthorized access!",
+    return res.status(500).json({
+      message: "Something went wrong!",
     });
   }
 };
 
 const run = async () => {
   try {
-    // await client.connect();
     const db = client.db("athleticHubDB");
     const eventsCollection = db.collection("events");
     const testimonialsCollection = db.collection("testimonials");
 
     // jwt generate
     app.post("/api/v1/jwt", (req, res) => {
-      const user = { email: req.body.email };
-      // console.log(email);
-      const token = jwt.sign(user, process.env.JWT_SECRET, {
-        expiresIn: "1d",
-      });
-      if (!token) {
-        return res.status(401).json({
-          error: "Token not generated",
+      try {
+        const user = { email: req.body.email };
+        // console.log(email);
+        const token = jwt.sign(user, process.env.JWT_SECRET, {
+          expiresIn: "1d",
         });
+        if (!token) {
+          return res.status(401).json({
+            error: "Token not generated",
+          });
+        }
+        res
+          .cookie("token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production", // true on Vercel
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          })
+          .send({ message: "JWT generated successfully" });
+      } catch (error) {
+        console.error("JWT generation failed:", error.message);
+        res.status(500).send({ error: "JWT creation failed" });
       }
-      res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: true,
-        })
-        .send({ message: "JWT generated successfully" });
+    });
+
+    // clear cookie
+    app.get("/api/v1/clear-cookie", (req, res) => {
+      try {
+        res
+          .clearCookie("token", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          })
+          .send({ message: "Cookie cleared successfully" });
+      } catch (error) {
+        console.error("Clear Cookie Error:", error.message);
+        res
+          .status(500)
+          .send({ error: "Something happened while Clear cookie" });
+      }
     });
 
     // create event
@@ -378,6 +398,10 @@ const run = async () => {
 
 run();
 
-app.listen(port, () => {
-  console.log(`Server is listening on http://localhost:${port}`);
-});
+if (process.env.NODE_ENV !== "production") {
+  app.listen(port, () => {
+    console.log(`Server is running locally on port ${port}`);
+  });
+}
+
+module.exports = app;
