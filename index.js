@@ -56,6 +56,7 @@ const run = async () => {
     const db = client.db("athleticHubDB");
     const eventsCollection = db.collection("events");
     const testimonialsCollection = db.collection("testimonials");
+    const newsLetterSignupCollection = db.collection("newsLetterSubscriptions");
 
     // jwt generate
     app.post("/api/v1/jwt", (req, res) => {
@@ -385,6 +386,34 @@ const run = async () => {
         }
 
         res.status(200).send(result);
+      } catch (error) {
+        console.log(error);
+      }
+    });
+
+    // subscribe newsletter
+    app.post("/api/v1/subscribe/newsletter", async (req, res) => {
+      try {
+        const { name, email } = req.body;
+        if (!name || !email) {
+          return res.status(403).send({ message: "credentials not found" });
+        }
+
+        const exists = await newsLetterSignupCollection.findOne({ email });
+
+        if (exists) {
+          return res.status(400).send({ message: "User already exists" });
+        } else {
+          const result = await newsLetterSignupCollection.insertOne({
+            name,
+            email,
+          });
+
+          if (!result) {
+            return res.status(401).send({ message: "Server error" });
+          }
+          res.status(200).send(result);
+        }
       } catch (error) {
         console.log(error);
       }
