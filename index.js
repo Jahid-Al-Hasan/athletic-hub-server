@@ -7,6 +7,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const { sendEventCreationEmail } = require("./src/services/emailServices");
+const QRCode = require("qrcode");
 
 // middlewares
 app.use(
@@ -60,7 +61,7 @@ const run = async () => {
     const eventsCollection = db.collection("events");
     const testimonialsCollection = db.collection("testimonials");
     const newsLetterSignupCollection = db.collection("newsLetterSubscriptions");
-    const usersCollection = db.collection("users");
+    const ticketsCollection = db.collection("tickets");
 
     // jwt generate
     app.post("/api/v1/jwt", (req, res) => {
@@ -198,7 +199,6 @@ const run = async () => {
       }
     });
 
-    // update event participants
     app.patch(
       "/api/v1/update-eventParticipants/:id",
       verifyJWT,
@@ -208,34 +208,98 @@ const run = async () => {
           const eventId = req.params?.id;
 
           if (!eventId || !email) {
-            return res.status(400).json({
-              message: "Event ID or user email is missing!",
-            });
+            return res
+              .status(400)
+              .json({ message: "Event ID or user email is missing!" });
           }
 
+          // Add participant to event
           const filter = { _id: new ObjectId(eventId) };
           const update = { $addToSet: { participants: email } };
 
           const result = await eventsCollection.updateOne(filter, update);
 
-          if (!result) {
-            return res.status(404).json({ message: "Event not updated." });
+          if (!result.modifiedCount) {
+            return res.status(400).json({
+              message: "User was already a participant or event not found.",
+            });
           }
-          // console.log(result);
 
-          res.status(200).json({
-            message: "Updated successfully",
+          // Check if ticket already exists
+          const ticketExists = await ticketsCollection.findOne({
+            eventId: new ObjectId(eventId),
+            email,
+          });
+
+          if (ticketExists) {
+            return res.status(200).json({
+              message: "Booking successful (ticket already exists).",
+              ticket: ticketExists,
+            });
+          }
+
+          // Create unique ticket ID
+          const ticketId = `TCK-${Date.now()}-${Math.floor(
+            Math.random() * 1000
+          )}`;
+
+          // Generate QR Code
+          const qrPayload = { ticketId, eventId, email };
+          const qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload));
+
+          // Save ticket
+          const ticket = {
+            eventId: new ObjectId(eventId),
+            email,
+            ticketId,
+            qrCode,
+            status: "valid",
+            createdAt: new Date().toISOString(),
+          };
+
+          await ticketsCollection.insertOne(ticket);
+
+          // Final response
+          return res.status(201).json({
+            message: "Booking successful & ticket generated!",
             result,
+            ticket,
           });
         } catch (error) {
-          console.error("Error fetching event:", error.message);
-          res.status(500).json({
-            error:
-              "An error occurred while fetching the event from the database.",
+          console.error("Error booking event:", error.message);
+          return res.status(500).json({
+            message: "An error occurred while booking the event.",
+            error: error.message,
           });
         }
       }
     );
+
+    // get ticket by eventId and email
+    app.get("/api/v1/tickets/:eventId", verifyJWT, async (req, res) => {
+      try {
+        const { eventId } = req.params;
+        const email = req.query.email;
+
+        if (!eventId || !email) {
+          return res.status(400).json({ message: "Missing eventId or email" });
+        }
+
+        const ticket = await ticketsCollection.findOne({
+          eventId: new ObjectId(eventId),
+          email,
+        });
+
+        if (!ticket) {
+          return res.status(404).json({ message: "Ticket not found" });
+        }
+
+        res.status(200).json(ticket);
+      } catch (error) {
+        console.error("Error fetching ticket:", error.message);
+        res.status(500).json({ message: "Failed to fetch ticket" });
+      }
+    });
 
     // get my booking events
     app.get("/api/v1/my-bookings", verifyJWT, async (req, res) => {
@@ -280,12 +344,30 @@ const run = async () => {
 
         const result = await eventsCollection.updateOne(filter, update);
 
-        if (!result) {
+        if (!result.modifiedCount) {
           return res.status(400).json({
             error: "Booking not canceled",
           });
         }
-        res.status(200).send(result);
+
+        // Delete ticket for this event & user
+        const ticketResult = await ticketsCollection.deleteOne({
+          eventId: new ObjectId(id),
+          email,
+        });
+
+        if (!ticketResult.deletedCount) {
+          return res.status(200).json({
+            message: "Booking canceled, but no ticket was found to delete.",
+            result,
+          });
+        }
+
+        return res.status(200).json({
+          message: "Booking and ticket canceled successfully",
+          result,
+          ticketResult,
+        });
       } catch (error) {
         console.error("Error fetching events:", error.message);
         res.status(500).json({
@@ -436,15 +518,6 @@ const run = async () => {
       } catch (error) {
         console.log(error);
       }
-    });
-
-    // test email send
-    app.get("/api/v1/send-email", async (req, res) => {
-      const subscribersCollection = await newsLetterSignupCollection
-        .find()
-        .toArray();
-      const subscribersEmail = subscribersCollection.map((user) => user.email);
-      res.send(subscribers);
     });
 
     console.log("Connected to MongoDB successfully");
