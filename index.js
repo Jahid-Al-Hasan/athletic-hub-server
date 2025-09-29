@@ -6,6 +6,7 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
+const { sendEventCreationEmail } = require("./src/services/emailServices");
 
 // middlewares
 app.use(
@@ -53,10 +54,13 @@ const verifyJWT = async (req, res, next) => {
 
 const run = async () => {
   try {
+    // database
     const db = client.db("athleticHubDB");
+    // collections
     const eventsCollection = db.collection("events");
     const testimonialsCollection = db.collection("testimonials");
     const newsLetterSignupCollection = db.collection("newsLetterSubscriptions");
+    const usersCollection = db.collection("users");
 
     // jwt generate
     app.post("/api/v1/jwt", (req, res) => {
@@ -119,12 +123,27 @@ const run = async () => {
             .json({ error: "All required fields must be provided." });
         }
 
-        newEvent.createdAt = new Date();
+        newEvent.createdAt = new Date().toISOString();
         const result = await eventsCollection.insertOne(newEvent);
+        if (!result) {
+          return res.status(400).send({ message: "Something went wrong" });
+        }
+        const subscribersCollection = await newsLetterSignupCollection
+          .find()
+          .toArray();
+
+        const subscribersEmail = subscribersCollection.map(
+          (user) => user.email
+        );
+
         res.status(201).json({
           message: "Event created successfully",
           insertedId: result.insertedId,
         });
+
+        if (result && subscribersCollection) {
+          await sendEventCreationEmail(subscribersEmail, newEvent);
+        }
       } catch (error) {
         console.log("Error creating event:", error.message);
         res.status(500).json({
@@ -417,6 +436,15 @@ const run = async () => {
       } catch (error) {
         console.log(error);
       }
+    });
+
+    // test email send
+    app.get("/api/v1/send-email", async (req, res) => {
+      const subscribersCollection = await newsLetterSignupCollection
+        .find()
+        .toArray();
+      const subscribersEmail = subscribersCollection.map((user) => user.email);
+      res.send(subscribers);
     });
 
     console.log("Connected to MongoDB successfully");
